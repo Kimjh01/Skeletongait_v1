@@ -1,7 +1,7 @@
 data_cfg:
   dataset_name: CCVID
   dataset_root: ./datasets/CCVID
-  dataset_partition: ./datasets/CCVID/CCVID_partition.json
+  dataset_partition: ./datasets/CCVID/CCVID_partition.json #CCVID.json
   num_workers: 1
   data_in_use: [True, True]  
   remove_no_gallery: false
