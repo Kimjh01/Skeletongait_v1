@@ -2,6 +2,7 @@ data_cfg:
   dataset_name: CCVID
   dataset_root: ./datasets/CCVID
   dataset_partition: ./datasets/CCVID/CCVID_partition.json #CCVID.json
+  partition_by_pid: True
   num_workers: 1
   data_in_use: [True, True]  
   remove_no_gallery: false
@@ -67,8 +68,8 @@ trainer_cfg:
   sampler:
     batch_shuffle: true
     batch_size: [2, 4]  
-    frames_num_fixed: 30
-    frames_skip_num: 4
+    frames_num_fixed: 6
+    frames_skip_num: 1
     sample_type: fixed_ordered
     type: TripletSampler
   transform:

@@ -18,7 +18,8 @@ class DataSet(tordata.Dataset):
         self.types_list = [seq_info[1] for seq_info in self.seqs_info]
         self.views_list = [seq_info[2] for seq_info in self.seqs_info]
 
-        self.label_set = sorted(list(set(self.label_list)))
+        # 여기서 label_set을 self.label_list로 변경하여 수정
+        self.label_set = sorted(list(set(self.label_list)))  # self.label_set을 정의
         self.types_set = sorted(list(set(self.types_list)))
         self.views_set = sorted(list(set(self.views_list)))
         self.seqs_data = [None] * len(self)
@@ -123,3 +124,35 @@ class DataSet(tordata.Dataset):
 
         self.seqs_info = get_seqs_info_list(
             train_set) if training else get_seqs_info_list(test_set)
+    
+    def __dataset_parser_by_pid(self, data_config, training):
+        dataset_root = data_config['dataset_root']
+        with open(data_config['dataset_partition'], "r") as f:
+            partition = json.load(f)
+
+        pid_list = sorted(list(partition.keys()))
+        if training:
+            msg_mgr = get_msg_mgr()
+            msg_mgr.log_info("-------- Train Pid List --------")
+            if len(pid_list) >= 3:
+                msg_mgr.log_info('[%s, %s, ..., %s]' % (pid_list[0], pid_list[1], pid_list[-1]))
+            else:
+                msg_mgr.log_info(pid_list)
+
+        def get_seqs_info_list(pids):
+            seqs_info_list = []
+            for lab in pids:
+                for typ in sorted(os.listdir(osp.join(dataset_root, lab))):
+                    for vie in sorted(os.listdir(osp.join(dataset_root, lab, typ))):
+                        seq_info = [lab, typ, vie]
+                        seq_path = osp.join(dataset_root, *seq_info)
+                        if not osp.exists(seq_path):
+                            continue
+                        seq_dirs = sorted(os.listdir(seq_path))
+                        if seq_dirs != []:
+                            seq_dirs = [osp.join(seq_path, dir) for dir in seq_dirs]
+                            seqs_info_list.append([*seq_info, seq_dirs])
+            return seqs_info_list
+
+        self.seqs_info = get_seqs_info_list(pid_list)
+
