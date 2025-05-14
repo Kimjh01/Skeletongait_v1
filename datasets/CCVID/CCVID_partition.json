@@ -1,0 +1,22 @@
+{
+    "TRAIN_SET": [
+        "session1-01_000",
+        "session2-01_000",
+        "session3-01_000"
+    ],
+    "TEST_SET": [
+        "session1-01_000",
+        "session2-01_000",
+        "session3-01_000"
+    ],
+    "GALLERY_SET": [
+        "session1-01_000",
+        "session2-01_000",
+        "session3-01_000"
+    ],
+    "PROBE_SET": [
+        "session1-01_000",
+        "session2-01_000",
+        "session3-01_000"
+    ]
+}

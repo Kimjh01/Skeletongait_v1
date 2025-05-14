@@ -7,21 +7,24 @@ from utils import ddp_all_gather
 
 
 def gather_and_scale_wrapper(func):
-    """Internal wrapper: gather the input from multple cards to one card, and scale the loss by the number of cards.
+    """Internal wrapper: gather the input from multiple cards to one card, and scale the loss by the number of cards.
     """
 
     @functools.wraps(func)
     def inner(*args, **kwds):
-        try:
+        if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
+            return func(*args, **kwds)  # 🔥 DDP가 없으면 기존 함수 그대로 실행
 
+        try:
             for k, v in kwds.items():
                 kwds[k] = ddp_all_gather(v)
 
             loss, loss_info = func(*args, **kwds)
             loss *= torch.distributed.get_world_size()
             return loss, loss_info
-        except:
-            raise ArgumentError
+        except Exception as e:
+            raise RuntimeError(f"gather_and_scale_wrapper encountered an error: {e}")
+
     return inner
 
 

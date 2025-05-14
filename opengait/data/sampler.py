@@ -9,16 +9,19 @@ class TripletSampler(tordata.sampler.Sampler):
     def __init__(self, dataset, batch_size, batch_shuffle=False):
         self.dataset = dataset
         self.batch_size = batch_size
+        
         if len(self.batch_size) != 2:
             raise ValueError(
-                "batch_size should be (P x K) not {}".format(batch_size))
+                "batch_size should be (P x K), not {}".format(batch_size))
+        
         self.batch_shuffle = batch_shuffle
+        self.world_size = dist.get_world_size() if dist.is_initialized() else 1  # 안전한 world_size 설정
 
-        self.world_size = dist.get_world_size()
-        if (self.batch_size[0]*self.batch_size[1]) % self.world_size != 0:
+        if (self.batch_size[0] * self.batch_size[1]) % self.world_size != 0:
             raise ValueError("World size ({}) is not divisible by batch_size ({} x {})".format(
                 self.world_size, batch_size[0], batch_size[1]))
-        self.rank = dist.get_rank()
+        
+        self.rank = dist.get_rank() if dist.is_initialized() else 0 
 
     def __iter__(self):
         while True:
@@ -50,19 +53,25 @@ class TripletSampler(tordata.sampler.Sampler):
 
 
 def sync_random_sample_list(obj_list, k, common_choice=False):
+    
+    if len(obj_list) < k:
+        k = len(obj_list)  
+
     if common_choice:
         idx = random.choices(range(len(obj_list)), k=k) 
         idx = torch.tensor(idx)
-    if len(obj_list) < k:
-        idx = random.choices(range(len(obj_list)), k=k)
-        idx = torch.tensor(idx)
     else:
         idx = torch.randperm(len(obj_list))[:k]
+    
     if torch.cuda.is_available():
         idx = idx.cuda()
-    torch.distributed.broadcast(idx, src=0)
+
+    if torch.distributed.is_initialized():
+        torch.distributed.broadcast(idx, src=0)
+    
     idx = idx.tolist()
     return [obj_list[i] for i in idx]
+
 
 
 class InferenceSampler(tordata.sampler.Sampler):

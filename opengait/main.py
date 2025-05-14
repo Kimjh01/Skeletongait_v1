@@ -1,4 +1,3 @@
-
 import os
 import argparse
 import torch
@@ -6,11 +5,12 @@ import torch.nn as nn
 from modeling import models
 from utils import config_loader, get_ddp_module, init_seeds, params_count, get_msg_mgr
 
+# 단일 GPU 사용 설정
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
 parser = argparse.ArgumentParser(description='Main program for opengait.')
-parser.add_argument('--local_rank', type=int, default=0,
-                    help="passed by torch.distributed.launch module")
-parser.add_argument('--local-rank', type=int, default=0,
-                    help="passed by torch.distributed.launch module, for pytorch >=2.0")
+#parser.add_argument('--local_rank', type=int, default=0, help="passed by torch.distributed.launch module")
+#parser.add_argument('--local-rank', type=int, default=0, help="passed by torch.distributed.launch module, for pytorch >=2.0")
 parser.add_argument('--cfgs', type=str,
                     default='config/default.yaml', help="path of config file")
 parser.add_argument('--phase', default='train',
@@ -34,11 +34,14 @@ def initialization(cfgs, training):
 
     msg_mgr.log_info(engine_cfg)
 
-    seed = torch.distributed.get_rank()
+    # 분산 관련 코드 제거
+    seed = 0  # 단일 GPU에서 실행
     init_seeds(seed)
 
 
+
 def run_model(cfgs, training):
+    cfgs['device'] = 'cuda' if torch.cuda.is_available() else 'cpu'
     msg_mgr = get_msg_mgr()
     model_cfg = cfgs['model_cfg']
     msg_mgr.log_info(model_cfg)
@@ -59,10 +62,12 @@ def run_model(cfgs, training):
 
 
 if __name__ == '__main__':
-    torch.distributed.init_process_group('nccl', init_method='env://')
-    if torch.distributed.get_world_size() != torch.cuda.device_count():
-        raise ValueError("Expect number of available GPUs({}) equals to the world size({}).".format(
-            torch.cuda.device_count(), torch.distributed.get_world_size()))
+    # 분산 학습 초기화 제거
+    # torch.distributed.init_process_group('nccl', init_method='env://')
+    # if torch.distributed.get_world_size() != torch.cuda.device_count():
+    #     raise ValueError("Expect number of available GPUs({}) equals to the world size({}).".format(
+    #         torch.cuda.device_count(), torch.distributed.get_world_size()))
+
     cfgs = config_loader(opt.cfgs)
     if opt.iter != 0:
         cfgs['evaluator_cfg']['restore_hint'] = int(opt.iter)

@@ -22,7 +22,9 @@ from torch.cuda.amp import GradScaler
 from abc import ABCMeta
 from abc import abstractmethod
 
-from . import backbones
+def load_backbones():
+    from opengait.modeling import backbones
+    return backbones
 from .loss_aggregator import LossAggregator
 from data.transform import get_transform
 from data.collate_fn import CollateFn
@@ -140,7 +142,7 @@ class BaseModel(MetaModel, nn.Module):
         if training and self.engine_cfg['enable_float16']:
             self.Scaler = GradScaler()
         self.save_path = osp.join('output/', cfgs['data_cfg']['dataset_name'],
-                                  cfgs['model_cfg']['model'], self.engine_cfg['save_name'])
+                                cfgs['model_cfg']['model'], self.engine_cfg['save_name'])
 
         self.build_network(cfgs['model_cfg'])
         self.init_parameters()
@@ -156,10 +158,21 @@ class BaseModel(MetaModel, nn.Module):
             self.evaluator_trfs = get_transform(
                 cfgs['evaluator_cfg']['transform'])
 
-        self.device = torch.distributed.get_rank()
-        torch.cuda.set_device(self.device)
-        self.to(device=torch.device(
-            "cuda", self.device))
+        # 기존 분산 학습 코드 삭제
+        # self.device = torch.distributed.get_rank()
+
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda:0")  # CUDA 디바이스를 명시적으로 지정
+        else:
+            self.device = torch.device("cpu")  # CPU 사용
+
+        
+        # CUDA 디바이스 설정
+        if torch.cuda.is_available():
+            torch.cuda.set_device(self.device)
+
+        # 모델을 지정된 디바이스로 이동
+        self.to(device=self.device)
 
         if training:
             self.loss_aggregator = LossAggregator(cfgs['loss_cfg'])
@@ -169,6 +182,7 @@ class BaseModel(MetaModel, nn.Module):
         restore_hint = self.engine_cfg['restore_hint']
         if restore_hint != 0:
             self.resume_ckpt(restore_hint)
+
 
     def get_backbone(self, backbone_cfg):
         """Get the backbone of the model."""
@@ -207,15 +221,18 @@ class BaseModel(MetaModel, nn.Module):
         dataset = DataSet(data_cfg, train)
 
         Sampler = get_attr_from([Samplers], sampler_cfg['type'])
-        vaild_args = get_valid_args(Sampler, sampler_cfg, free_keys=[
-            'sample_type', 'type'])
-        sampler = Sampler(dataset, **vaild_args)
+        
+        valid_args = get_valid_args(Sampler, sampler_cfg, free_keys=['sample_type', 'type'])
+        
+        # 분산 학습 관련 코드 제거
+        sampler = Sampler(dataset, **valid_args)
 
         loader = tordata.DataLoader(
             dataset=dataset,
             batch_sampler=sampler,
             collate_fn=CollateFn(dataset.label_set, sampler_cfg),
-            num_workers=data_cfg['num_workers'])
+            num_workers=data_cfg.get('num_workers', 0))  # 'num_workers' 기본값 설정 추가
+
         return loader
 
     def get_optimizer(self, optimizer_cfg):
@@ -235,7 +252,7 @@ class BaseModel(MetaModel, nn.Module):
         return scheduler
 
     def save_ckpt(self, iteration):
-        if torch.distributed.get_rank() == 0:
+        if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
             mkdir(osp.join(self.save_path, "checkpoints/"))
             save_name = self.engine_cfg['save_name']
             checkpoint = {
@@ -249,8 +266,7 @@ class BaseModel(MetaModel, nn.Module):
     def _load_ckpt(self, save_name):
         load_ckpt_strict = self.engine_cfg['restore_ckpt_strict']
 
-        checkpoint = torch.load(save_name, map_location=torch.device(
-            "cuda", self.device))
+        checkpoint = torch.load(save_name, map_location=torch.device(self.cfgs['device']))
         model_state_dict = checkpoint['model']
 
         if not load_ckpt_strict:

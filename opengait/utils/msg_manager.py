@@ -79,7 +79,7 @@ class MessageManager:
     def log_training_info(self):
         now = time.time()
         string = "Iteration {:0>5}, Cost {:.2f}s".format(
-            self.iteration, now-self.time, end="")
+            self.iteration, now-self.time, end="")  # python 3.6 이상에서 'end'가 문법 오류 발생 가능
         for i, (k, v) in enumerate(self.info_dict.items()):
             if 'scalar' not in k:
                 continue
@@ -115,7 +115,5 @@ noop = NoOp()
 
 
 def get_msg_mgr():
-    if torch.distributed.get_rank() > 0:
-        return noop
-    else:
-        return msg_mgr
+    # 분산 학습 사용하지 않으므로 이 부분을 항상 msg_mgr로 변경
+    return msg_mgr

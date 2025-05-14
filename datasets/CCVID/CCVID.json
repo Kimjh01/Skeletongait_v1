@@ -1,0 +1,17 @@
+{
+  "dataset_name": "CCVID",
+  "label2seq": {
+    "001": [
+      ["session1-01", "000"],
+      ["session3-01", "000"]
+    ],
+    "148": [
+      ["session2-01", "000"]
+    ]
+  },
+  "train": ["001"],
+  "test": {
+    "gallery": ["001"],
+    "probe": ["001"]
+  }
+}

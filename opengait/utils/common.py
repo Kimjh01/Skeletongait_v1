@@ -136,9 +136,9 @@ def clones(module, N):
 
 
 def config_loader(path):
-    with open(path, 'r') as stream:
+    with open(path, 'r', encoding='utf-8') as stream:
         src_cfgs = yaml.safe_load(stream)
-    with open("./configs/default.yaml", 'r') as stream:
+    with open("./configs/default.yaml", 'r', encoding='utf-8') as stream:
         dst_cfgs = yaml.safe_load(stream)
     MergeCfgsDict(src_cfgs, dst_cfgs)
     return dst_cfgs
@@ -169,14 +169,18 @@ def ddp_all_gather(features, dim=0, requires_grad=True):
     '''
         inputs: [n, ...]
     '''
+    if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
+        return features  # 🔥 DDP 미사용 시 원본 반환
 
     world_size = torch.distributed.get_world_size()
     rank = torch.distributed.get_rank()
-    feature_list = [torch.ones_like(features) for _ in range(world_size)]
+    
+    feature_list = [torch.zeros_like(features) for _ in range(world_size)]
     torch.distributed.all_gather(feature_list, features.contiguous())
 
     if requires_grad:
-        feature_list[rank] = features
+        feature_list[rank] = features  # 본인 rank의 값 유지
+    
     feature = torch.cat(feature_list, dim=dim)
     return feature
 
@@ -192,11 +196,16 @@ class DDPPassthrough(DDP):
 
 def get_ddp_module(module, find_unused_parameters=False, **kwargs):
     if len(list(module.parameters())) == 0:
-        # for the case that loss module has not parameters.
+        # for the case that loss module has no parameters.
         return module
-    device = torch.cuda.current_device()
-    module = DDPPassthrough(module, device_ids=[device], output_device=device,
-                            find_unused_parameters=find_unused_parameters, **kwargs)
+
+    # device 설정 (CUDA가 있으면 CUDA, 없으면 CPU로 설정)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # DDP 관련 코드 제거
+    # 이제 module은 단일 device (GPU 또는 CPU)로 이동됩니다.
+    module = module.to(device)
+
     return module
 
 
