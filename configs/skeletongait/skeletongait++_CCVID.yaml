@@ -1,10 +1,10 @@
 data_cfg:
   dataset_name: CCVID
-  dataset_root: ./datasets/CCVID
-  dataset_partition: ./datasets/CCVID/CCVID_partition.json #CCVID.json
-  partition_by_pid: True
+  dataset_root: ./datasets/CCVID_PROCESS_PKL
+  dataset_partition: ./datasets/CCVID_PROCESS_PKL/ccvid_split.json
+  partition_by_pid: true
   num_workers: 1
-  data_in_use: [True, True]  
+  data_in_use: [true, true]
   remove_no_gallery: false
   test_dataset_name: CCVID
 
@@ -13,10 +13,10 @@ evaluator_cfg:
   restore_ckpt_strict: true
   restore_hint: 60000
   save_name: SkeletonGaitPP
-  eval_func: evaluate_CCPG  # CCPG 기반 평가 함수지만, 필요시 custom 가능
+  eval_func: evaluate_CCPG
   sampler:
     batch_shuffle: false
-    batch_size: 4
+    batch_size: [4, 2]  # [total_sequences_per_batch, num_sequences_per_id]
     sample_type: all_ordered
     frames_all_limit: 720
   metric: euc
@@ -37,11 +37,11 @@ loss_cfg:
 model_cfg:
   model: SkeletonGaitPP
   Backbone:
-    in_channels: 3
+    in_channels: 2        # 스켈레톤 채널(보통 joint+limb 2채널)
     blocks: [1, 1, 1, 1]
     C: 2
   SeparateBNNecks:
-    class_num: 3  
+    class_num: 3          # 데이터셋 내 ID 수에 맞게 조절
 
 optimizer_cfg:
   lr: 0.1
@@ -67,7 +67,7 @@ trainer_cfg:
   total_iter: 60000
   sampler:
     batch_shuffle: true
-    batch_size: [2, 4]  
+    batch_size: [4, 2]  # [total_sequences_per_batch, num_sequences_per_id]
     frames_num_fixed: 6
     frames_skip_num: 1
     sample_type: fixed_ordered
