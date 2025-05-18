@@ -35,7 +35,9 @@ class CollateFn(object):
 
     def __call__(self, batch):
         batch_size = len(batch)
-        # currently, the functionality of feature_num is not fully supported yet, it refers to 1 now. We are supposed to make our framework support multiple source of input data, such as silhouette, or skeleton.
+        print(f"type(batch): {type(batch)}")
+        print(f"batch length: {len(batch)}")
+        # 현재 feature_num은 batch[0][0]의 길이로 설정
         feature_num = len(batch[0][0])
         seqs_batch, labs_batch, typs_batch, vies_batch = [], [], [], []
 
@@ -49,6 +51,9 @@ class CollateFn(object):
         count = 0
 
         def sample_frames(seqs):
+            print(f"type(seqs): {type(seqs)}")
+            print(f"seqs keys/length: {len(seqs) if hasattr(seqs, '__len__') else 'no len'}")
+            print(f"seqs sample: {seqs if isinstance(seqs, dict) else 'not dict'}")
             global count
             sampled_fras = [[] for i in range(feature_num)]
             seq_len = len(seqs[0])
@@ -59,7 +64,7 @@ class CollateFn(object):
                     frames_num = self.frames_num_fixed
                 else:
                     frames_num = random.choice(
-                        list(range(self.frames_num_min, self.frames_num_max+1)))
+                        list(range(self.frames_num_min, self.frames_num_max + 1)))
 
                 if self.ordered:
                     fs_n = frames_num + self.frames_skip_num
@@ -87,6 +92,10 @@ class CollateFn(object):
                         indices, frames_num, replace=replace)
 
             for i in range(feature_num):
+                # 방어코드 추가: seqs 길이 체크
+                if i >= len(seqs):
+                    print(f"[Warning] seqs index {i} out of range. seqs length: {len(seqs)}")
+                    continue
                 for j in indices[:self.frames_all_limit] if self.frames_all_limit > -1 and len(indices) > self.frames_all_limit else indices:
                     sampled_fras[i].append(seqs[i][j])
             return sampled_fras
@@ -95,6 +104,7 @@ class CollateFn(object):
         # b: batch_size
         # p: batch_size_per_gpu
         # g: gpus_num
+
         fras_batch = [sample_frames(seqs) for seqs in seqs_batch]  # [b, f]
         batch = [fras_batch, labs_batch, typs_batch, vies_batch, None]
 

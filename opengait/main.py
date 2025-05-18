@@ -7,7 +7,7 @@ from utils import config_loader, get_ddp_module, init_seeds, params_count, get_m
 
 # 단일 GPU 사용 설정
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-
+torch.cuda.empty_cache()
 parser = argparse.ArgumentParser(description='Main program for opengait.')
 #parser.add_argument('--local_rank', type=int, default=0, help="passed by torch.distributed.launch module")
 #parser.add_argument('--local-rank', type=int, default=0, help="passed by torch.distributed.launch module, for pytorch >=2.0")
