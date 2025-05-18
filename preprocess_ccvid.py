@@ -5,16 +5,13 @@ from glob import glob
 from tqdm import tqdm
 from ultralytics import YOLO
 import mediapipe as mp
+from PIL import Image
 
-# 모델 및 Mediapipe 초기화
-model = YOLO("yolov8m-seg.pt")
-mp_pose = mp.solutions.pose
-POSE = mp_pose.Pose(static_image_mode=True)
-
-# 사용자 설정
+# === 초기 설정 ===
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATASET_ROOT = os.path.join(BASE_DIR, "CCVID")
 OUTPUT_ROOT = os.path.join(BASE_DIR, "CCVID_PROCESS")
+RESIZED_ROOT = os.path.join(BASE_DIR, "CCVID_PROCESS_RESIZED")
 TXT_PATHS = {
     "train": os.path.join(DATASET_ROOT, "train.txt"),
     "query": os.path.join(DATASET_ROOT, "query.txt"),
@@ -23,14 +20,20 @@ TXT_PATHS = {
 FRAMES_NUM_FIXED = 6
 CANVAS_SIZE = (256, 256)
 SIGMA = 4.0
+TARGET_SIZE = (128, 88)
 
-# LIMB 정의
+# === Mediapipe 및 YOLO 초기화 ===
+model = YOLO("yolov8m-seg.pt")
+mp_pose = mp.solutions.pose
+POSE = mp_pose.Pose(static_image_mode=True)
+
 LIMB_PAIRS = [
     (11, 13), (13, 15), (12, 14), (14, 16),
     (11, 12), (23, 25), (25, 27), (24, 26),
     (26, 28), (23, 24), (11, 23), (12, 24)
 ]
 
+# === 기능 정의 ===
 def generate_gaussian_map(center, shape, sigma):
     x = np.arange(0, shape[1], 1, np.float32)
     y = np.arange(0, shape[0], 1, np.float32)
@@ -103,9 +106,8 @@ def sample_frames(frame_paths, n):
 def save_skeleton_as_png(joint_map, limb_map, save_path):
     h, w = joint_map.shape
     img = np.zeros((h, w, 3), dtype=np.uint8)
-    img[:, :, 0] = (joint_map * 255).astype(np.uint8)  # R 채널: joint map
-    img[:, :, 1] = (limb_map * 255).astype(np.uint8)   # G 채널: limb map
-    # B 채널은 0 유지
+    img[:, :, 0] = (joint_map * 255).astype(np.uint8)
+    img[:, :, 1] = (limb_map * 255).astype(np.uint8)
     cv2.imwrite(save_path, img)
 
 def process_image(img_path, sil_path, skel_path):
@@ -113,10 +115,8 @@ def process_image(img_path, sil_path, skel_path):
     if image is None:
         print(f"이미지 로드 실패: {img_path}")
         return
-    # 실루엣 저장
     mask = extract_person_mask(image)
     cv2.imwrite(sil_path, mask)
-    # 스켈레톤 저장 (png)
     joints = extract_joints(image)
     jm, lm = generate_maps(joints, CANVAS_SIZE, SIGMA)
     save_skeleton_as_png(jm, lm, skel_path)
@@ -124,10 +124,7 @@ def process_image(img_path, sil_path, skel_path):
 def process_split(split_name, txt_path):
     with open(txt_path, 'r') as f:
         lines = f.read().splitlines()
-
-    # video_path 기준 정렬
     lines = sorted(lines, key=lambda x: x.split()[0])
-
     for line in tqdm(lines, desc=f"Processing {split_name}"):
         video_path, pid, _ = line.strip().split()
         full_path = os.path.join(DATASET_ROOT, video_path)
@@ -139,7 +136,6 @@ def process_split(split_name, txt_path):
             print(f"이미지 없음: {full_path}")
             continue
         frame_paths = sample_frames(frame_paths, FRAMES_NUM_FIXED)
-
         for i, frame_path in enumerate(frame_paths):
             base = f"{i:05d}"
             sil_out = os.path.join(OUTPUT_ROOT, split_name, "silhouette", pid, video_path.replace("/", "_"))
@@ -150,6 +146,53 @@ def process_split(split_name, txt_path):
                           os.path.join(sil_out, f"{base}.png"),
                           os.path.join(skel_out, f"{base}.png"))
 
+def resize_with_aspect_ratio_and_padding(img, target_size=TARGET_SIZE):
+    target_h, target_w = target_size
+    w, h = img.size
+    scale = min(target_w / w, target_h / h)
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+    img_resized = img.resize((new_w, new_h), Image.BILINEAR)
+    new_img = Image.new("L" if img.mode == "L" else img.mode, (target_w, target_h))
+    pad_left = (target_w - new_w) // 2
+    pad_top = (target_h - new_h) // 2
+    new_img.paste(img_resized, (pad_left, pad_top))
+    return new_img
+
+def process_and_save_images(input_folder, output_folder, is_skeleton=False):
+    frame_paths = sorted(glob(os.path.join(input_folder, "*.png")))
+    if not frame_paths:
+        return
+    os.makedirs(output_folder, exist_ok=True)
+    for frame_path in frame_paths:
+        img = Image.open(frame_path)
+        img = img.convert("RGB") if is_skeleton else img.convert("L")
+        img_resized = resize_with_aspect_ratio_and_padding(img, TARGET_SIZE)
+        filename = os.path.basename(frame_path)
+        save_path = os.path.join(output_folder, filename)
+        img_resized.save(save_path)
+
+def process_split_resize(root, split, output_root):
+    sil_root = os.path.join(root, split, "silhouette")
+    skel_root = os.path.join(root, split, "skeleton")
+    person_ids = sorted(os.listdir(sil_root))
+    for pid in tqdm(person_ids, desc=f"{split} persons"):
+        pid_sil_path = os.path.join(sil_root, pid)
+        pid_skel_path = os.path.join(skel_root, pid)
+        sample_folders = sorted(os.listdir(pid_sil_path))
+        for sample in sample_folders:
+            sil_folder = os.path.join(pid_sil_path, sample)
+            skel_folder = os.path.join(pid_skel_path, sample)
+            if not (os.path.exists(sil_folder) and os.path.exists(skel_folder)):
+                print(f"Missing silhouette or skeleton for {pid}/{sample}, skip")
+                continue
+            save_sil_folder = os.path.join(output_root, split, "silhouette", pid, sample)
+            save_skel_folder = os.path.join(output_root, split, "skeleton", pid, sample)
+            process_and_save_images(sil_folder, save_sil_folder, is_skeleton=False)
+            process_and_save_images(skel_folder, save_skel_folder, is_skeleton=True)
+
 if __name__ == "__main__":
     for split in ["train", "query", "gallery"]:
         process_split(split, TXT_PATHS[split])
+    for split in ["train", "query", "gallery"]:
+        process_split_resize(OUTPUT_ROOT, split, RESIZED_ROOT)
