@@ -10,7 +10,6 @@ import numpy as np
 from glob import glob 
 from tqdm import tqdm
 import matplotlib.cm as cm
-import torch.distributed as dist
 from torchvision import transforms as T
 from torch.utils.data import Dataset, DataLoader
 from sklearn.impute import KNNImputer, SimpleImputer
@@ -563,48 +562,6 @@ def GenerateHeatmapTransform(
 
     return transform
 
-#########################################################################################################
-# The following code is DDP progress codes.
-#########################################################################################################
-class SequentialDistributedSampler(torch.utils.data.sampler.Sampler):
-    """
-    Distributed Sampler that subsamples indicies sequentially,
-    making it easier to collate all results at the end.
-    Even though we only use this sampler for eval and predict (no training),
-    which means that the model params won't have to be synced (i.e. will not hang
-    for synchronization even if varied number of forward passes), we still add extra
-    samples to the sampler to make it evenly divisible (like in `DistributedSampler`)
-    to make it easy to `gather` or `reduce` resulting tensors at the end of the loop.
-    """
-
-    def __init__(self, dataset, batch_size, rank=None, num_replicas=None):
-        if num_replicas is None:
-            if not torch.distributed.is_available():
-                raise RuntimeError("Requires distributed package to be available")
-            num_replicas = torch.distributed.get_world_size()
-        if rank is None:
-            if not torch.distributed.is_available():
-                raise RuntimeError("Requires distributed package to be available")
-            rank = torch.distributed.get_rank()
-        self.dataset = dataset
-        self.num_replicas = num_replicas
-        self.rank = rank
-        self.batch_size = batch_size
-        self.num_samples = int(math.ceil(len(self.dataset) * 1.0 / self.batch_size / self.num_replicas)) * self.batch_size
-        self.total_size = self.num_samples * self.num_replicas
-
-    def __iter__(self):
-        indices = list(range(len(self.dataset)))
-        # add extra samples to make it evenly divisible
-        indices += [indices[-1]] * (self.total_size - len(indices))
-        # subsample
-        indices = indices[self.rank * self.num_samples : (self.rank + 1) * self.num_samples]
-        return iter(indices)
-
-    def __len__(self):
-        return self.num_samples
-
-
 class TransferDataset(Dataset):
     def __init__(self, args, generate_heatemap_cfgs) -> None:
         super().__init__()
@@ -664,7 +621,8 @@ def get_args():
     parser.add_argument('--ext_name', type=str, default='', help="Extension name to be appended to the 'save_root' for identification.")
     parser.add_argument('--dataset_name', type=str, required=True, help="Name of the dataset being preprocessed.")
     parser.add_argument('--heatemap_cfg_path', type=str, default='configs/skeletongait/pretreatment_heatmap.yaml', help="Path to the heatmap generator configuration file.")
-    parser.add_argument("--local_rank", type=int, default=0, help="Local rank for distributed processing, defaults to 0 for non-distributed setups.")
+    parser.add_argument('--num_workers', type=int, default=8, help="Number of workers for dataloader.")
+    parser.add_argument('--batch_size', type=int, default=1, help="Batch size for processing.")
     opt = parser.parse_args()
     return opt
 
@@ -690,23 +648,26 @@ def replace_variables(data, context=None):
     return data
 
 if __name__ == "__main__":
-    dist.init_process_group("nccl", init_method='env://')
-    local_rank = torch.distributed.get_rank()
-    world_size = torch.distributed.get_world_size()
-
+    # 분산 학습 관련 코드 제거
     args = get_args()
 
     # Load the heatmap generator configuration
     with open(args.heatemap_cfg_path, 'r') as stream:
         generate_heatemap_cfgs = yaml.safe_load(stream)
         generate_heatemap_cfgs = replace_variables(generate_heatemap_cfgs, generate_heatemap_cfgs)
+    
     # Create the dataset
     dataset = TransferDataset(args, generate_heatemap_cfgs)
 
-    # Create the dataloader
-    dist_sampler = SequentialDistributedSampler(dataset, batch_size=1, rank=local_rank, num_replicas=world_size)
-    dataloader = DataLoader(dataset=dataset, batch_size=1, sampler=dist_sampler, num_workers=8, collate_fn=mycollate)
+    # Create the dataloader - 단일 학습용으로 변경
+    dataloader = DataLoader(
+        dataset=dataset, 
+        batch_size=args.batch_size, 
+        shuffle=False,  # 순차적으로 처리
+        num_workers=args.num_workers, 
+        collate_fn=mycollate
+    )
+    
+    # 진행률 표시와 함께 데이터 처리
     for _, tmp in tqdm(enumerate(dataloader), total=len(dataloader)):
         pass
-
-    
